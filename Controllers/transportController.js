@@ -1,8 +1,20 @@
 const TransportRoute = require('../Models/transportRoute');
+const Vehicle = require('../Models/Vehicle');
+const Driver = require('../Models/Driver');
 
 exports.createTransportRoute = async (req, res) => {
   try {
     const { name, description, stops, vehicle, driver } = req.body;
+    const existingVehicle = await Vehicle.findById(vehicle);
+    const existingDriver = await Driver.findById(driver);
+    
+    if (!existingVehicle) {
+      return res.status(400).json({ error: 'Invalid vehicle ID' });
+    }
+
+    if (!existingDriver) {
+      return res.status(400).json({ error: 'Invalid driver ID' });
+    }
 
     const newTransportRoute = new TransportRoute({
       name,

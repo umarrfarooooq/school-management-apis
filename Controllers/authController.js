@@ -1,5 +1,6 @@
 const User = require("../Models/User");
 const jwt = require("jsonwebtoken");
+const sendEmail = require("../Utils/sendEmail")
 
 exports.registerUser = async (req, res) => {
   const { username, email, password, roles } = req.body;
@@ -74,6 +75,113 @@ exports.loginUser = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+exports.forgotPassword = async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const resetCode = user.getResetPasswordCode();
+    await user.save({ validateBeforeSave: false });
+    const message = `Your password reset code is ${resetCode}. This code will expire in 10 minutes.`;
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'Password reset code',
+        message
+      });
+      res.status(200).json({ success: true, data: 'Email sent' });
+    } catch (err) {
+      console.log(err);
+      user.resetPasswordCode = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(500).json({ message: 'Email could not be sent' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
+exports.verifyResetCode = async (req, res) => {
+  try {
+    const user = await User.findOne({
+      email: req.body.email,
+      resetPasswordCode: req.body.code,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
 
-// 665eb2a933c3b6ac9501f091
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired code' });
+    }
+
+    res.status(200).json({ success: true, message: 'Code verified successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const user = await User.findOne({
+      email: req.body.email,
+      resetPasswordCode: req.body.code,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired code' });
+    }
+
+    user.password = req.body.password;
+    user.resetPasswordCode = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.resendCode = async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const resetCode = user.getResetPasswordCode();
+    await user.save({ validateBeforeSave: false });
+    const message = `Your new password reset code is ${resetCode}. This code will expire in 10 minutes.`;
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'New Password Reset Code',
+        message
+      });
+      res.status(200).json({ success: true, data: 'New code sent' });
+    } catch (err) {
+      console.log(err);
+      user.resetPasswordCode = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(500).json({ message: 'Email could not be sent' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

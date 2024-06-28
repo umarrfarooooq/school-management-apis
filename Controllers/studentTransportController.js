@@ -1,9 +1,19 @@
 const StudentTransport = require('../Models/studentTransport');
+const Student = require('../Models/Student')
+const TransportRoute = require('../Models/transportRoute')
 
 exports.assignStudentToTransportRoute = async (req, res) => {
   try {
     const { student, transportRoute, boardingStop } = req.body;
-
+    const checkStudent = await Student.findById(student);
+    const checkTransportRoute = await TransportRoute.findById(transportRoute);
+    if (!checkStudent) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    if (!checkTransportRoute) {
+      return res.status(404).json({ error: 'Transport Route not found' });
+    }
+    
     const newStudentTransport = new StudentTransport({
       student,
       transportRoute,
