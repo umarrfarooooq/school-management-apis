@@ -1,9 +1,13 @@
 const User = require("../Models/User");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../Utils/sendEmail")
+const { OAuth2Client } = require('google-auth-library');
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 
 exports.registerUser = async (req, res) => {
-  const { username, email, password, roles } = req.body;
+  const { firstName, lastName, email, password, roles } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -13,7 +17,8 @@ exports.registerUser = async (req, res) => {
     }
 
     const user = new User({
-      username,
+      firstName,
+      lastName,
       email,
       password,
       roles,
@@ -39,14 +44,203 @@ exports.registerUser = async (req, res) => {
   }
 };
 
+exports.inviteUser = async (req, res) => {
+  const { email, firstName, lastName, roles, phoneNumber } = req.body;
+
+  try {
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: "User already exists" });
+    }
+
+    const user = new User({
+      email,
+      firstName,
+      lastName,
+      roles,
+      phoneNumber,
+      isInvited: true,
+    });
+
+    user.generateInviteToken();
+
+    const savedUser = await user.save();
+
+    const inviteLink = `${process.env.FRONTEND_URL}signup/${savedUser.inviteToken}`;
+    const message = `You have been invited to join our platform. Please use this link to complete your registration: ${inviteLink}`;
+    
+    await sendEmail({
+      email: savedUser.email,
+      subject: 'Invitation to Join',
+      message
+    });
+
+    res.status(201).json({
+      message: "Invitation sent successfully",
+      user: {
+        id: savedUser._id,
+        email: savedUser.email,
+        firstName: savedUser.firstName,
+        lastName: savedUser.lastName,
+        roles: savedUser.roles,
+        phoneNumber: savedUser.phoneNumber,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.initiateSignup = async (req, res) => {
+  const { inviteToken } = req.params;
+
+  try {
+    const user = await User.findOne({
+      inviteToken,
+      inviteTokenExpire: { $gt: Date.now() },
+      isInvited: true
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired invite token" });
+    }
+
+    res.status(200).json({
+      message: "Valid invite token",
+      email: user.email
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.completeSignup = async (req, res) => {
+  const { inviteToken, password, googleToken } = req.body;
+
+  try {
+    const user = await User.findOne({
+      inviteToken,
+      inviteTokenExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired invite token" });
+    }
+
+    if (googleToken) {
+      const googleUser = await verifyGoogleToken(googleToken);
+      if (googleUser.email !== user.email) {
+        return res.status(400).json({ message: "Google account email does not match invite email" });
+      }
+      user.googleId = googleUser.id;
+    } else if (password) {
+      user.password = password;
+    } else {
+      return res.status(400).json({ message: "Please provide either a Google token or a password" });
+    }
+
+    user.isInvited = false;
+    user.inviteToken = undefined;
+    user.inviteTokenExpire = undefined;
+
+    await user.save();
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    res.status(200).json({
+      message: "Signup completed successfully",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        roles: user.roles,
+        phoneNumber: user.phoneNumber,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+async function verifyGoogleToken(token) {
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    return payload;
+  } catch (error) {
+    throw new Error('Invalid Google token');
+  }
+}
+
+exports.loginWithGoogle = async (req, res) => {
+  const { googleToken } = req.body;
+
+  try {
+    const googleUser = await verifyGoogleToken(googleToken);
+
+    const user = await User.findOne({ email: googleUser.email });
+
+    if (!user) {
+      return res.status(404).json({ message: "No user found with this Google account." });
+    }
+
+    if (!user.googleId) {
+      user.googleId = googleUser.sub;
+      await user.save();
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    res.status(200).json({
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        roles: user.roles,
+        phoneNumber: user.phoneNumber,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find();
-    res.json(users);
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const users = await User.find()
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalUsers = await User.countDocuments();
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    res.json({
+      users,
+      currentPage: page,
+      totalPages,
+      hasNextPage: page < totalPages
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-}
+};
 
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
@@ -75,6 +269,7 @@ exports.loginUser = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 exports.forgotPassword = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.body.email });
