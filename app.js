@@ -42,6 +42,7 @@ const driverRoute = require("./Routes/driverRoute");
 const vehicleRoute = require("./Routes/vehicleRoute");
 const studentTransportRoute = require("./Routes/studentTransportRoute");
 const transportRoute = require("./Routes/transportRoute");
+const financeRoute = require("./Routes/financeRoute");
 
 app.use("/api/v1/students", studentRoute);
 app.use("/api/v1/users", authRoute);
@@ -56,6 +57,7 @@ app.use("/api/v1/drivers", driverRoute);
 app.use("/api/v1/vehicle", vehicleRoute);
 app.use("/api/v1/studentTransport", studentTransportRoute);
 app.use("/api/v1/transport", transportRoute);
+app.use("/api/v1/finance", financeRoute);
 
 const PORT = process.env.PORT;
 

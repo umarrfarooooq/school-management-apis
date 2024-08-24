@@ -10,6 +10,8 @@ router.post("/complete-signup", authController.completeSignup);
 
 // User management
 router.get("/all", authController.getAllUsers);
+router.get("/:id", authController.getUserById);
+router.put("/update/:id", authController.updateUser);
 
 
 // Login routes
